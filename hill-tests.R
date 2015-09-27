@@ -9,7 +9,7 @@ hill.test3d <- function() {
   checkEquals(h$b, 1)
   checkEquals(h$g, 3)
               
-  checkEquals(h$x.star, c(2, 2, 2))
+  checkEquals(h$equil$x, c(2, 2, 2))
   checkEquals(h$f(2), 2)
   checkEquals(h$df(2), -2.666666666666666666666)
 }

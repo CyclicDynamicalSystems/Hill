@@ -1,11 +1,13 @@
 library(polynom)
 library(deSolve)
+library(plyr)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(rgl)
 library(plotrix)
 library(calibrate)
+library(xtable)
 
 # Hill
 hill <- function(n, a, g, b = 1) {
@@ -21,27 +23,36 @@ hill <- function(n, a, g, b = 1) {
     Re(xs[abs(Im(xs)) < 1e-9 & Re(xs) > 0][1])
   }
   calc.eigen <- function() {
-    upsilon = -df.star
-    values <- df.star * exp(2i * pi / n * (0:(n - 1))) - 1
-    circle.points <- df.star * exp(2i * pi / 4 * (0:3)) - 1
+    values <- eigen(equil$A)$values
+    vectors <- t(eigen(equil$A)$vectors)
+    rownames(vectors) = paste0("e", 1:n)
+    colnames(vectors) = paste0("x", 1:n)
+    vectors.proj <- vectors
+    vectors.proj[seq(1, n, by = 2),] <- Re(vectors.proj[seq(1, n, by = 2),])
+    vectors.proj[seq(2, n, by = 2),] <- Im(vectors.proj[seq(2, n, by = 2),])
+    vectors.proj <- Re(vectors.proj)
+
     plot <- function() {
+      circle.points <- equil$df[1] * exp(2i * pi / 4 * (0:3)) * 1.2 - 1
       x <- Re(values)
       y <- Im(values)
       labs <- vector("expression", n)
       for (i in 1:n)
-        labs[i] <- substitute(expression(lambda[i]), list(i = i - 1))[2]
+        labs[i] <- substitute(expression(lambda[i]), list(i = i))[2]
       graphics::plot(Re(circle.points), Im(circle.points), asp = 1, type = "n", xlab = "", ylab = "", las = 1, main = "Eigenvalues")
       mtext("Re", side = 1, line = 3, las = 1, cex = 1.5)
       mtext("Im", side = 2, line = 2, las = 1, cex = 1.5)
       abline(h = 0)
       abline(v = 0)
-      draw.circle(-1, 0, abs(df.star), border = "red", nv = 200)
+      draw.circle(-1, 0, abs(equil$df), border = "red", nv = 200)
       points(x, y, pch = 16, col = "blue")
       textxy(x, y, labs, cex = 1.5)
       points(-1, 0, pch = 16, col = "forestgreen")
     }
     list(
       values = values,
+      vectors = vectors,
+      vectors.proj = vectors.proj,
       plot = plot
     )
   }
@@ -72,11 +83,12 @@ hill <- function(n, a, g, b = 1) {
     x0 <- calc.equilibrium()
     f1 <- df(x0)
     g1 <- -b
-    w.star <- sqrt(f1 ^ 2 - b ^ 2)
-    T.star <- 2 * pi / w.star
-    tau.star <- acos(-g1 / f1) / w.star
+    equil <- list()
+    equil$w <- sqrt(f1 ^ 2 - b ^ 2)
+    equil$T <- 2 * pi / equil$w
+    equil$tau <- acos(-g1 / f1) / equil$w
     
-    simulate <- function(x0 = 1, tau = 1, times = seq(0, 300, by = 0.1), col="red") {
+    simulate <- function(x0 = 1, tau = 1, times = seq(0, 100, by = 0.1), col="red") {
       model <- function(t, x, parms) {
         xp <- ifelse(t < tau, x0, lagvalue(t - tau))
         dx <- f(xp) - x
@@ -84,10 +96,12 @@ hill <- function(n, a, g, b = 1) {
       }
       names(x0) <- c("x")
       data <- dede(y = x0, times = times, func = model, parms = NULL)
-      period <- calc.period(data[-(1:(nrow(data) / 2)), 2]) * (times[2] - times[1])
+      period <- calc.period(as.numeric(data[-(1:(nrow(data) / 2)), 2])) * (times[2] - times[1])
       plot <- function() {
         df <- data.frame(data)
-        ggplot(df, aes(x = time, y = x)) + geom_line(colour = col)
+        ggplot(df, aes(x = time, y = x)) + 
+          geom_line(colour = col) +
+          ggtitle("Autorepressilator")
       }
       list(
         x0 = x0,
@@ -102,14 +116,12 @@ hill <- function(n, a, g, b = 1) {
       x0 = x0,
       f1 = f1,
       g1 = g1,
-      w.star = w.star,
-      T.star = T.star,
-      tau.star = tau.star,
+      equil = equil,
       simulate = simulate
     )
   }
 
-  simulate <- function(x0, times = seq(0, 300, by = 0.1)) {
+  simulate <- function(x0, times = seq(0, 100, by = 0.1)) {
     model <- function(t, x, params) {
       xp <- c(x[-1], x[1])
       dx <- f(xp) - b * x
@@ -117,7 +129,9 @@ hill <- function(n, a, g, b = 1) {
     }
     names(x0) <- paste0("x", 1:length(x0))
     data <- ode(y = x0, times = times, func = model)
-    period <- calc.period(data[-(1:(nrow(data) / 2)), 2]) * (times[2] - times[1])
+    e <- data[,2:(n + 1)] %*% t(eigen$vectors.proj)
+    data <- Re(cbind(data, e))
+    period <- calc.period(as.numeric(data[-(1:(nrow(data) / 2)), 2])) * (times[2] - times[1])
     
     plot.var <- function(col="red") {
       df <- data.frame(data) %>% gather(var, value, -time)
@@ -125,9 +139,12 @@ hill <- function(n, a, g, b = 1) {
     }
     plot.2d <- function(varx = "x1", vary = "x2", col="red") {
       df <- data.frame(data)
-      ggplot(df, aes_string(x = varx, y = vary)) + geom_path(colour = col)
+      ggplot(df, aes_string(x = varx, y = vary)) + 
+        geom_path(colour = col) +
+        ggtitle(paste0("Phase portrait (", varx, ", ", vary, ")"))
     }
     plot.3d <- function(varx = "x1", vary = "x2", varz = "x3", col="red") {
+      open3d()
       lines3d(data[,c(varx, vary, varz)], col = col)
     }
     list(
@@ -139,16 +156,66 @@ hill <- function(n, a, g, b = 1) {
     )
   }
   
-  print <- function() {
-    cat(paste0("f(x) = ", a, "/(1+x^", g, ") - ", ifelse(b == 1, "", b), "x\n"))
-    cat(paste0("x0 = ", x.star[1], "\n"))
-    cat(paste0("df/dx|x0 = ", df.star[1], "\n"))
-    cat(paste0("Repressilator/Hopf: (w = ", repr$w.star, ", T = ", repr$T.star, ", tau = ", repr$tau.star, ")\n"))
-    cat(paste0("Eigenvalues = (", paste0(eigen$values, collapse = ", "), ")\n"))
+  simulate.multi <- function(size = 3, lim = 5, times = seq(0, 300, by = 0.1)) {
+    data <- list()
+    for (i in 1:size)
+      data[[i]] <- simulate(runif(n) * lim, times)
+    plot.2d <- function(varx = "x1", vary = "x2") {
+      df <- do.call(rbind, 
+        lapply(seq_along(data), function(i) data.frame(data[[i]]$data) %>% mutate(id = as.factor(paste0("t", i)))))
+      ggplot(df, aes_string(x = varx, y = vary)) + 
+        geom_path(aes(colour = id)) +
+        ggtitle(paste0("Phase portrait (", varx, ", ", vary, ")"))
+    }
+    plot.3d <- function(varx = "x1", vary = "x2", varz = "x3") {
+      open3d()
+      cols <- rainbow(size)
+      for (i in 1:size)
+        lines3d(data[[i]]$data[,c(varx, vary, varz)], col = cols[i])
+    }
+    list(
+      data = data,
+      size = size,
+      plot.2d = plot.2d,
+      plot.3d = plot.3d
+    )
   }
   
-  x.star <- rep(calc.equilibrium(), n)
-  df.star <- df(x.star)
+  overview <- function() {
+    mat <- function(caption, matrix) {
+      paste0(caption, ":\n", paste0(paste0("  ", capture.output(matrix)), collapse = "\n"), "\n\n")
+    }
+    val <- function(caption, value) {
+      paste0("  ", caption, " = ", value, "\n")
+    }
+    paste0(
+      paste0("f(x) = ", a, "/(1+x^", g, ") - ", ifelse(b == 1, "", b), "x\n"),
+      paste0("\n"),
+      val("x*", equil$x[1]),
+      val("df/dx|x*", equil$df[1]),
+      paste0("\n"),
+      mat("Jacobian matrix", equil$A),
+      paste0("Eigenvalues:\n", paste0("  lambda_", 1:n, " = ", eigen$values, collapse = "\n"), "\n\n"),
+      mat("Eigenvectors", eigen$vectors),
+      paste0("Repressilator:\n"),
+      val("w*", repr$equil$w),
+      val("T*", repr$equil$T),
+      val("tau*", repr$equil$tau),
+      paste0("")
+    )
+  }
+  
+  print <- function() {
+    cat(overview())
+  }
+  
+  equil <- list()
+  equil$x <- rep(calc.equilibrium(), n)
+  equil$df <- df(equil$x)
+  equil$A <- matrix(data = rep(0, n * n), nrow = n, ncol = n)
+  diag(equil$A) <- -1
+  equil$A[(row(equil$A) - col(equil$A) + n) %% n == 1] <- equil$df
+  
   repr <- calc.repr()
   eigen <- calc.eigen()
   
@@ -158,14 +225,15 @@ hill <- function(n, a, g, b = 1) {
     g = g, 
     b = b, 
     
-    x.star = x.star,
-    df.star = df.star,
+    equil = equil,
     repr = repr,
     eigen = eigen,
     
     f = f,
     df = df,
     simulate = simulate,
-    print = print
+    simulate.multi = simulate.multi,
+    print = print,
+    overview = overview
   )
 }
