@@ -121,7 +121,7 @@ hill <- function(n, a, g, b = 1) {
     )
   }
 
-  simulate <- function(x0, times = seq(0, 100, by = 0.1)) {
+  simulate <- function(x0, times = seq(0, 100, by = 0.1), drop.start = F) {
     model <- function(t, x, params) {
       xp <- c(x[-1], x[1])
       dx <- f(xp) - b * x
@@ -129,6 +129,8 @@ hill <- function(n, a, g, b = 1) {
     }
     names(x0) <- paste0("x", 1:length(x0))
     data <- ode(y = x0, times = times, func = model)
+    if (drop.start)
+      data <- data[(nrow(data) / 2):nrow(data), ]
     e <- data[,2:(n + 1)] %*% t(eigen$vectors.proj)
     data <- Re(cbind(data, e))
     period <- calc.period(as.numeric(data[-(1:(nrow(data) / 2)), 2])) * (times[2] - times[1])
@@ -156,10 +158,10 @@ hill <- function(n, a, g, b = 1) {
     )
   }
   
-  simulate.multi <- function(size = 3, lim = 5, times = seq(0, 300, by = 0.1)) {
+  simulate.multi <- function(size = 3, lim = 5, times = seq(0, 300, by = 0.1), drop.start = F) {
     data <- list()
     for (i in 1:size)
-      data[[i]] <- simulate(runif(n) * lim, times)
+      data[[i]] <- simulate(runif(n) * lim, times, drop.start = drop.start)
     plot.2d <- function(varx = "x1", vary = "x2") {
       df <- do.call(rbind, 
         lapply(seq_along(data), function(i) data.frame(data[[i]]$data) %>% mutate(id = as.factor(paste0("t", i)))))
